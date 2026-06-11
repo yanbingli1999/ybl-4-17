@@ -645,7 +645,7 @@ function initEventListeners() {
   });
 }
 
-function handleDatasetSelectForDesensitize(datasetId) {
+async function handleDatasetSelectForDesensitize(datasetId) {
   currentDesensitizeDatasetId = datasetId || null;
   const previewSection = document.getElementById('desensitizePreview');
 
@@ -662,7 +662,13 @@ function handleDatasetSelectForDesensitize(datasetId) {
     return;
   }
 
-  const history = [];
+  let history = [];
+  try {
+    const res = await fetch('/api/history');
+    history = await res.json();
+  } catch (err) {
+    console.error('获取历史记录失败:', err);
+  }
   const comparison = buildFieldComparison(dataset, history);
   currentPreviewComparison = comparison;
   renderFieldComparison(comparison);
@@ -676,10 +682,10 @@ function buildFieldComparison(dataset, history) {
     : '未拟合';
 
   return [
-    { field: '数据集名称', original: dataset.name, desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
-    { field: '样品名', original: dataset.sampleName || '(空)', desensitized: '已隐藏', status: 'hidden' },
-    { field: '批次号', original: dataset.batchNumber || '(空)', desensitized: '已隐藏', status: 'hidden' },
-    { field: '备注', original: dataset.remarks || '(空)', desensitized: '已隐藏', status: 'hidden' },
+    { field: '数据集名称', original: '******（原始名称已脱敏）', desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
+    { field: '样品名', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
+    { field: '批次号', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
+    { field: '备注', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
     { field: '匿名编号', original: dataset.anonymousId || '(无)', desensitized: dataset.anonymousId || '保留', status: 'kept' },
     { field: '数据点位', original: `${dataset.points.length} 个点`, desensitized: `${dataset.points.length} 个点`, status: 'kept' },
     { field: '拟合摘要', original: fitSummary, desensitized: fitSummary, status: 'kept' }

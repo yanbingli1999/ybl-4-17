@@ -361,12 +361,6 @@ app.post('/api/shared-copies', (req, res) => {
     id: generateId(),
     originalDatasetId: dataset.id,
     anonymousId: dataset.anonymousId || generateAnonymousId(),
-    originalInfo: {
-      name: dataset.name,
-      sampleName: dataset.sampleName || '',
-      batchNumber: dataset.batchNumber || '',
-      remarks: dataset.remarks || ''
-    },
     desensitizedInfo: {
       name: dataset.anonymousId || generateAnonymousId(),
       sampleName: null,
@@ -374,10 +368,10 @@ app.post('/api/shared-copies', (req, res) => {
       remarks: null
     },
     fieldComparison: [
-      { field: '数据集名称', original: dataset.name, desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
-      { field: '样品名', original: dataset.sampleName || '(空)', desensitized: '已隐藏', status: 'hidden' },
-      { field: '批次号', original: dataset.batchNumber || '(空)', desensitized: '已隐藏', status: 'hidden' },
-      { field: '备注', original: dataset.remarks || '(空)', desensitized: '已隐藏', status: 'hidden' },
+      { field: '数据集名称', original: '******（原始名称已脱敏）', desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
+      { field: '样品名', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
+      { field: '批次号', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
+      { field: '备注', original: '******（已隐藏）', desensitized: '已隐藏', status: 'hidden' },
       { field: '匿名编号', original: dataset.anonymousId || '(无)', desensitized: dataset.anonymousId || '保留', status: 'kept' },
       { field: '数据点位', original: `${dataset.points.length} 个点`, desensitized: `${dataset.points.length} 个点`, status: 'kept' },
       { field: '拟合摘要', original: latestFit ? `${modelTypeLabels[latestFit.modelType] || latestFit.modelType} · R²=${latestFit.metrics.rSquared.toFixed(4)}` : '未拟合', desensitized: latestFit ? `${modelTypeLabels[latestFit.modelType] || latestFit.modelType} · R²=${latestFit.metrics.rSquared.toFixed(4)}` : '未拟合', status: 'kept' }
