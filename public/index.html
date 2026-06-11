@@ -20,6 +20,9 @@
           <h2>📋 数据录入</h2>
           <div class="dataset-controls">
             <input type="text" id="datasetName" placeholder="数据集名称" value="我的实验数据">
+            <input type="text" id="sampleName" placeholder="样品名（可选）">
+            <input type="text" id="batchNumber" placeholder="批次号（可选）">
+            <textarea id="remarks" placeholder="备注（可选）" rows="2"></textarea>
           </div>
           <div class="table-toolbar">
             <button id="addRowBtn" class="btn btn-primary">➕ 添加行</button>
@@ -132,6 +135,7 @@
           <div class="tabs">
             <button class="tab-btn active" data-tab="history">📜 历史记录</button>
             <button class="tab-btn" data-tab="datasets">💾 数据集</button>
+            <button class="tab-btn" data-tab="desensitize">🔒 脱敏共享</button>
           </div>
 
           <div class="tab-content" id="tab-history">
@@ -149,8 +153,42 @@
               <div class="empty-state">暂无保存的数据集</div>
             </div>
           </div>
+
+          <div class="tab-content" id="tab-desensitize" style="display:none;">
+            <div class="desensitize-section">
+              <h3 class="subsection-title">📤 选择要脱敏的数据集</h3>
+              <div class="dataset-select-wrapper">
+                <select id="desensitizeDatasetSelect" class="form-select">
+                  <option value="">-- 请选择数据集 --</option>
+                </select>
+              </div>
+
+              <div id="desensitizePreview" class="desensitize-preview" style="display:none;">
+                <h3 class="subsection-title">🔍 脱敏前后字段对比</h3>
+                <div id="fieldComparisonTable" class="field-comparison-table"></div>
+                <div class="desensitize-actions">
+                  <button id="createSharedCopyBtn" class="btn btn-success btn-block">🔒 生成只读脱敏副本</button>
+                </div>
+              </div>
+
+              <h3 class="subsection-title">📋 已生成的脱敏副本</h3>
+              <div id="sharedCopiesList" class="shared-copies-list">
+                <div class="empty-state">暂无脱敏副本</div>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
+    </div>
+
+    <div id="sharedCopyModal" class="modal-overlay" style="display:none;">
+      <div class="modal-content shared-copy-modal">
+        <div class="modal-header">
+          <h2>🔒 脱敏共享副本（只读）</h2>
+          <button id="closeSharedCopyModal" class="modal-close-btn">✕</button>
+        </div>
+        <div class="modal-body" id="sharedCopyModalBody"></div>
+      </div>
     </div>
 
     <div id="toast" class="toast"></div>

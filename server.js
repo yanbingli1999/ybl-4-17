@@ -7,9 +7,16 @@ const math = require('mathjs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const modelTypeLabels = {
+  linear: '线性模型',
+  exponential: '指数模型',
+  quadratic: '二次曲线'
+};
+
 const DATA_DIR = path.join(__dirname, 'data');
 const DATASETS_FILE = path.join(DATA_DIR, 'datasets.json');
 const HISTORY_FILE = path.join(DATA_DIR, 'history.json');
+const SHARED_COPIES_FILE = path.join(DATA_DIR, 'shared_copies.json');
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -24,6 +31,9 @@ function ensureDataFiles() {
   }
   if (!fs.existsSync(HISTORY_FILE)) {
     fs.writeFileSync(HISTORY_FILE, JSON.stringify([], null, 2));
+  }
+  if (!fs.existsSync(SHARED_COPIES_FILE)) {
+    fs.writeFileSync(SHARED_COPIES_FILE, JSON.stringify([], null, 2));
   }
 }
 ensureDataFiles();
@@ -43,6 +53,12 @@ function writeJsonFile(filePath, data) {
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+}
+
+function generateAnonymousId() {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).substr(2, 6).toUpperCase();
+  return `DS-${timestamp}-${random}`;
 }
 
 function linearRegression(points) {
@@ -174,7 +190,7 @@ app.get('/api/datasets', (req, res) => {
 });
 
 app.post('/api/datasets', (req, res) => {
-  const { name, points } = req.body;
+  const { name, points, sampleName, batchNumber, remarks } = req.body;
   if (!name || !points || !Array.isArray(points)) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
@@ -182,6 +198,10 @@ app.post('/api/datasets', (req, res) => {
   const dataset = {
     id: generateId(),
     name,
+    sampleName: sampleName || '',
+    batchNumber: batchNumber || '',
+    remarks: remarks || '',
+    anonymousId: generateAnonymousId(),
     points,
     createdAt: new Date().toISOString()
   };
@@ -192,7 +212,7 @@ app.post('/api/datasets', (req, res) => {
 
 app.put('/api/datasets/:id', (req, res) => {
   const { id } = req.params;
-  const { name, points } = req.body;
+  const { name, points, sampleName, batchNumber, remarks } = req.body;
   const datasets = readJsonFile(DATASETS_FILE);
   const index = datasets.findIndex(d => d.id === id);
   if (index === -1) {
@@ -200,6 +220,9 @@ app.put('/api/datasets/:id', (req, res) => {
   }
   datasets[index].name = name || datasets[index].name;
   datasets[index].points = points || datasets[index].points;
+  if (sampleName !== undefined) datasets[index].sampleName = sampleName;
+  if (batchNumber !== undefined) datasets[index].batchNumber = batchNumber;
+  if (remarks !== undefined) datasets[index].remarks = remarks;
   datasets[index].updatedAt = new Date().toISOString();
   writeJsonFile(DATASETS_FILE, datasets);
   res.json(datasets[index]);
@@ -319,6 +342,109 @@ app.delete('/api/history/:id', (req, res) => {
   writeJsonFile(HISTORY_FILE, history);
   res.json({ success: true });
 });
+
+app.post('/api/shared-copies', (req, res) => {
+  const { datasetId } = req.body;
+  if (!datasetId) {
+    return res.status(400).json({ error: '请指定要脱敏的数据集ID' });
+  }
+
+  const datasets = readJsonFile(DATASETS_FILE);
+  const dataset = datasets.find(d => d.id === datasetId);
+  if (!dataset) {
+    return res.status(404).json({ error: '数据集不存在' });
+  }
+
+  const latestFit = findLatestFitForDataset(datasetId);
+
+  const sharedCopy = {
+    id: generateId(),
+    originalDatasetId: dataset.id,
+    anonymousId: dataset.anonymousId || generateAnonymousId(),
+    originalInfo: {
+      name: dataset.name,
+      sampleName: dataset.sampleName || '',
+      batchNumber: dataset.batchNumber || '',
+      remarks: dataset.remarks || ''
+    },
+    desensitizedInfo: {
+      name: dataset.anonymousId || generateAnonymousId(),
+      sampleName: null,
+      batchNumber: null,
+      remarks: null
+    },
+    fieldComparison: [
+      { field: '数据集名称', original: dataset.name, desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
+      { field: '样品名', original: dataset.sampleName || '(空)', desensitized: '已隐藏', status: 'hidden' },
+      { field: '批次号', original: dataset.batchNumber || '(空)', desensitized: '已隐藏', status: 'hidden' },
+      { field: '备注', original: dataset.remarks || '(空)', desensitized: '已隐藏', status: 'hidden' },
+      { field: '匿名编号', original: dataset.anonymousId || '(无)', desensitized: dataset.anonymousId || '保留', status: 'kept' },
+      { field: '数据点位', original: `${dataset.points.length} 个点`, desensitized: `${dataset.points.length} 个点`, status: 'kept' },
+      { field: '拟合摘要', original: latestFit ? `${modelTypeLabels[latestFit.modelType] || latestFit.modelType} · R²=${latestFit.metrics.rSquared.toFixed(4)}` : '未拟合', desensitized: latestFit ? `${modelTypeLabels[latestFit.modelType] || latestFit.modelType} · R²=${latestFit.metrics.rSquared.toFixed(4)}` : '未拟合', status: 'kept' }
+    ],
+    points: dataset.points,
+    fitSummary: latestFit ? {
+      modelType: latestFit.modelType,
+      modelEquation: latestFit.modelEquation,
+      metrics: latestFit.metrics,
+      pointsCount: latestFit.points.length
+    } : null,
+    readOnly: true,
+    createdAt: new Date().toISOString()
+  };
+
+  const copies = readJsonFile(SHARED_COPIES_FILE);
+  copies.unshift(sharedCopy);
+  if (copies.length > 100) {
+    copies.length = 100;
+  }
+  writeJsonFile(SHARED_COPIES_FILE, copies);
+  res.json(sharedCopy);
+});
+
+app.get('/api/shared-copies', (req, res) => {
+  const copies = readJsonFile(SHARED_COPIES_FILE);
+  const summaries = copies.map(c => ({
+    id: c.id,
+    originalDatasetId: c.originalDatasetId,
+    anonymousId: c.anonymousId,
+    desensitizedInfo: c.desensitizedInfo,
+    pointsCount: c.points.length,
+    fitSummary: c.fitSummary,
+    readOnly: c.readOnly,
+    createdAt: c.createdAt
+  }));
+  res.json(summaries);
+});
+
+app.get('/api/shared-copies/:id', (req, res) => {
+  const { id } = req.params;
+  const copies = readJsonFile(SHARED_COPIES_FILE);
+  const copy = copies.find(c => c.id === id);
+  if (!copy) {
+    return res.status(404).json({ error: '脱敏副本不存在' });
+  }
+  res.json(copy);
+});
+
+app.delete('/api/shared-copies/:id', (req, res) => {
+  const { id } = req.params;
+  let copies = readJsonFile(SHARED_COPIES_FILE);
+  const initialLength = copies.length;
+  copies = copies.filter(c => c.id !== id);
+  if (copies.length === initialLength) {
+    return res.status(404).json({ error: '脱敏副本不存在' });
+  }
+  writeJsonFile(SHARED_COPIES_FILE, copies);
+  res.json({ success: true });
+});
+
+function findLatestFitForDataset(datasetId) {
+  const history = readJsonFile(HISTORY_FILE);
+  const fits = history.filter(h => h.datasetId === datasetId);
+  if (fits.length === 0) return null;
+  return fits[0];
+}
 
 app.listen(PORT, () => {
   console.log(`实验曲线拟合台 服务器已启动: http://localhost:${PORT}`);

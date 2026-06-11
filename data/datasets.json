@@ -2,6 +2,10 @@
   {
     "id": "mq965wj1qwz0ozfdl",
     "name": "示例实验数据",
+    "sampleName": "样品A-标准溶液",
+    "batchNumber": "BATCH-2026-0612-001",
+    "remarks": "校准曲线实验，室温25℃，湿度60%",
+    "anonymousId": "DS-MQ965XJ-A7K2F9",
     "points": [
       {
         "x": 1,

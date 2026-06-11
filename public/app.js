@@ -3,6 +3,9 @@ let residualChart = null;
 let currentResultId = null;
 let currentDatasetId = null;
 let isDirty = false;
+let currentDesensitizeDatasetId = null;
+let allDatasetsCache = [];
+let currentPreviewComparison = null;
 
 const modelTypeLabels = {
   linear: '线性模型',
@@ -219,6 +222,10 @@ function clearDataTable() {
   for (let i = 0; i < 5; i++) {
     addDataRow();
   }
+  document.getElementById('datasetName').value = '我的实验数据';
+  document.getElementById('sampleName').value = '';
+  document.getElementById('batchNumber').value = '';
+  document.getElementById('remarks').value = '';
   currentDatasetId = null;
   currentResultId = null;
   clearDirty();
@@ -281,6 +288,9 @@ function loadSampleData() {
   ];
   setTableData(samples);
   document.getElementById('datasetName').value = '示例实验数据';
+  document.getElementById('sampleName').value = '样品A-标准溶液';
+  document.getElementById('batchNumber').value = 'BATCH-2026-0612-001';
+  document.getElementById('remarks').value = '校准曲线实验，室温25℃，湿度60%';
   currentDatasetId = null;
   currentResultId = null;
   resetDisplay();
@@ -451,34 +461,50 @@ async function loadDatasets() {
   try {
     const res = await fetch('/api/datasets');
     const datasets = await res.json();
+    allDatasetsCache = datasets;
     const datasetsList = document.getElementById('datasetsList');
 
     if (datasets.length === 0) {
       datasetsList.innerHTML = '<div class="empty-state">暂无保存的数据集</div>';
-      return;
+    } else {
+      datasetsList.innerHTML = datasets.map(d => `
+        <div class="dataset-item" data-id="${d.id}">
+          <div class="history-title">${d.name}</div>
+          <div class="history-meta">
+            <span>${d.points.length} 个点</span>
+            <span>${new Date(d.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <div class="history-actions">
+            <button class="btn-load" onclick="loadDataset('${d.id}')">加载</button>
+            <button class="btn-delete" onclick="deleteDataset('${d.id}')">删除</button>
+          </div>
+        </div>
+      `).join('');
     }
 
-    datasetsList.innerHTML = datasets.map(d => `
-      <div class="dataset-item" data-id="${d.id}">
-        <div class="history-title">${d.name}</div>
-        <div class="history-meta">
-          <span>${d.points.length} 个点</span>
-          <span>${new Date(d.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-        </div>
-        <div class="history-actions">
-          <button class="btn-load" onclick="loadDataset('${d.id}')">加载</button>
-          <button class="btn-delete" onclick="deleteDataset('${d.id}')">删除</button>
-        </div>
-      </div>
-    `).join('');
+    populateDesensitizeSelect(datasets);
   } catch (err) {
     console.error('加载数据集失败:', err);
+  }
+}
+
+function populateDesensitizeSelect(datasets) {
+  const select = document.getElementById('desensitizeDatasetSelect');
+  if (!select) return;
+  const currentValue = select.value;
+  select.innerHTML = '<option value="">-- 请选择数据集 --</option>' +
+    datasets.map(d => `<option value="${d.id}">${d.name} (${d.points.length} 点)</option>`).join('');
+  if (currentValue && datasets.find(d => d.id === currentValue)) {
+    select.value = currentValue;
   }
 }
 
 async function saveCurrentDataset() {
   const points = getTableData();
   const name = document.getElementById('datasetName').value || '未命名数据集';
+  const sampleName = document.getElementById('sampleName').value;
+  const batchNumber = document.getElementById('batchNumber').value;
+  const remarks = document.getElementById('remarks').value;
 
   if (points.length < 2) {
     showToast('请至少输入2个有效数据点', 'error');
@@ -489,7 +515,7 @@ async function saveCurrentDataset() {
     const res = await fetch('/api/datasets', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, points })
+      body: JSON.stringify({ name, points, sampleName, batchNumber, remarks })
     });
     if (!res.ok) throw new Error('保存失败');
     const dataset = await res.json();
@@ -510,6 +536,9 @@ async function updateCurrentDataset() {
 
   const points = getTableData();
   const name = document.getElementById('datasetName').value || '未命名数据集';
+  const sampleName = document.getElementById('sampleName').value;
+  const batchNumber = document.getElementById('batchNumber').value;
+  const remarks = document.getElementById('remarks').value;
 
   if (points.length < 2) {
     showToast('请至少输入2个有效数据点', 'error');
@@ -520,7 +549,7 @@ async function updateCurrentDataset() {
     const res = await fetch(`/api/datasets/${currentDatasetId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, points })
+      body: JSON.stringify({ name, points, sampleName, batchNumber, remarks })
     });
     if (!res.ok) throw new Error('更新失败');
     clearDirty();
@@ -539,6 +568,9 @@ async function loadDataset(id) {
     if (!dataset) throw new Error('数据集不存在');
 
     document.getElementById('datasetName').value = dataset.name;
+    document.getElementById('sampleName').value = dataset.sampleName || '';
+    document.getElementById('batchNumber').value = dataset.batchNumber || '';
+    document.getElementById('remarks').value = dataset.remarks || '';
     setTableData(dataset.points);
     currentDatasetId = id;
     currentResultId = null;
@@ -574,6 +606,10 @@ function initTabs() {
       tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
       document.getElementById('tab-history').style.display = tab === 'history' ? 'block' : 'none';
       document.getElementById('tab-datasets').style.display = tab === 'datasets' ? 'block' : 'none';
+      document.getElementById('tab-desensitize').style.display = tab === 'desensitize' ? 'block' : 'none';
+      if (tab === 'desensitize') {
+        loadSharedCopies();
+      }
     });
   });
 }
@@ -591,6 +627,333 @@ function initEventListeners() {
   document.getElementById('saveDatasetBtn').addEventListener('click', saveCurrentDataset);
   document.getElementById('updateDatasetBtn').addEventListener('click', updateCurrentDataset);
   document.getElementById('datasetName').addEventListener('input', markDirty);
+  document.getElementById('sampleName').addEventListener('input', markDirty);
+  document.getElementById('batchNumber').addEventListener('input', markDirty);
+  document.getElementById('remarks').addEventListener('input', markDirty);
+
+  document.getElementById('desensitizeDatasetSelect').addEventListener('change', (e) => {
+    handleDatasetSelectForDesensitize(e.target.value);
+  });
+
+  document.getElementById('createSharedCopyBtn').addEventListener('click', createSharedCopy);
+
+  document.getElementById('closeSharedCopyModal').addEventListener('click', closeSharedCopyModal);
+  document.getElementById('sharedCopyModal').addEventListener('click', (e) => {
+    if (e.target.id === 'sharedCopyModal') {
+      closeSharedCopyModal();
+    }
+  });
+}
+
+function handleDatasetSelectForDesensitize(datasetId) {
+  currentDesensitizeDatasetId = datasetId || null;
+  const previewSection = document.getElementById('desensitizePreview');
+
+  if (!datasetId) {
+    previewSection.style.display = 'none';
+    currentPreviewComparison = null;
+    return;
+  }
+
+  const dataset = allDatasetsCache.find(d => d.id === datasetId);
+  if (!dataset) {
+    previewSection.style.display = 'none';
+    currentPreviewComparison = null;
+    return;
+  }
+
+  const history = [];
+  const comparison = buildFieldComparison(dataset, history);
+  currentPreviewComparison = comparison;
+  renderFieldComparison(comparison);
+  previewSection.style.display = 'block';
+}
+
+function buildFieldComparison(dataset, history) {
+  const latestFit = history.find(h => h.datasetId === dataset.id) || null;
+  const fitSummary = latestFit
+    ? `${modelTypeLabels[latestFit.modelType] || latestFit.modelType} · R²=${latestFit.metrics.rSquared.toFixed(4)}`
+    : '未拟合';
+
+  return [
+    { field: '数据集名称', original: dataset.name, desensitized: dataset.anonymousId || '已脱敏', status: 'replaced' },
+    { field: '样品名', original: dataset.sampleName || '(空)', desensitized: '已隐藏', status: 'hidden' },
+    { field: '批次号', original: dataset.batchNumber || '(空)', desensitized: '已隐藏', status: 'hidden' },
+    { field: '备注', original: dataset.remarks || '(空)', desensitized: '已隐藏', status: 'hidden' },
+    { field: '匿名编号', original: dataset.anonymousId || '(无)', desensitized: dataset.anonymousId || '保留', status: 'kept' },
+    { field: '数据点位', original: `${dataset.points.length} 个点`, desensitized: `${dataset.points.length} 个点`, status: 'kept' },
+    { field: '拟合摘要', original: fitSummary, desensitized: fitSummary, status: 'kept' }
+  ];
+}
+
+function renderFieldComparison(comparison) {
+  const table = document.getElementById('fieldComparisonTable');
+  const headerRow = `
+    <div class="field-comparison-row field-comparison-header">
+      <span class="field-name">字段</span>
+      <span class="field-original">原始值</span>
+      <span class="field-desensitized">脱敏后</span>
+    </div>
+  `;
+  const rows = comparison.map(item => {
+    let statusClass = '';
+    if (item.status === 'kept') statusClass = 'status-kept';
+    else if (item.status === 'hidden') statusClass = 'status-hidden';
+    else if (item.status === 'replaced') statusClass = 'status-replaced';
+
+    const statusIcon = item.status === 'kept' ? '✓' : item.status === 'hidden' ? '✕' : '↻';
+
+    return `
+      <div class="field-comparison-row">
+        <span class="field-name">${item.field}</span>
+        <span class="field-original">${item.original}</span>
+        <span class="field-desensitized ${statusClass}">${statusIcon} ${item.desensitized}</span>
+      </div>
+    `;
+  }).join('');
+
+  table.innerHTML = headerRow + rows;
+}
+
+async function createSharedCopy() {
+  if (!currentDesensitizeDatasetId) {
+    showToast('请先选择要脱敏的数据集', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('createSharedCopyBtn');
+  const originalText = btn.textContent;
+  btn.textContent = '⏳ 生成中...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/shared-copies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ datasetId: currentDesensitizeDatasetId })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || '生成失败');
+    }
+    const copy = await res.json();
+    showToast(`脱敏副本已生成！匿名编号：${copy.anonymousId}`, 'success');
+    loadSharedCopies();
+  } catch (err) {
+    showToast(err.message, 'error');
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
+}
+
+async function loadSharedCopies() {
+  try {
+    const res = await fetch('/api/shared-copies');
+    const copies = await res.json();
+    const list = document.getElementById('sharedCopiesList');
+
+    if (copies.length === 0) {
+      list.innerHTML = '<div class="empty-state">暂无脱敏副本</div>';
+      return;
+    }
+
+    list.innerHTML = copies.map(c => {
+      const fitText = c.fitSummary
+        ? `${modelTypeLabels[c.fitSummary.modelType] || c.fitSummary.modelType} · R²=${c.fitSummary.metrics.rSquared.toFixed(4)}`
+        : '未拟合';
+      return `
+        <div class="shared-copy-item">
+          <div class="shared-copy-anonymous">${c.anonymousId}</div>
+          <span class="shared-copy-badge">只读副本</span>
+          <div class="shared-copy-fit">${fitText}</div>
+          <div class="shared-copy-meta">
+            <span>${c.pointsCount} 个点</span>
+            <span>${new Date(c.createdAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <div class="shared-copy-actions">
+            <button class="btn-view-copy" onclick="viewSharedCopy('${c.id}')">查看副本</button>
+            <button class="btn-delete-copy" onclick="deleteSharedCopy('${c.id}')">删除</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    console.error('加载脱敏副本失败:', err);
+  }
+}
+
+async function viewSharedCopy(id) {
+  try {
+    const res = await fetch(`/api/shared-copies/${id}`);
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || '加载失败');
+    }
+    const copy = await res.json();
+    renderSharedCopyModal(copy);
+    document.getElementById('sharedCopyModal').style.display = 'flex';
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function renderSharedCopyModal(copy) {
+  const body = document.getElementById('sharedCopyModalBody');
+
+  const fitSummary = copy.fitSummary ? `
+    <div class="readonly-section">
+      <h3>📊 拟合摘要</h3>
+      <div class="fit-summary-card">
+        <div class="fit-equation">${copy.fitSummary.modelEquation}</div>
+        <div class="fit-metrics-grid">
+          <div class="fit-metric-item">
+            <div class="fit-metric-label">R²</div>
+            <div class="fit-metric-value">${copy.fitSummary.metrics.rSquared.toFixed(6)}</div>
+          </div>
+          <div class="fit-metric-item">
+            <div class="fit-metric-label">MSE</div>
+            <div class="fit-metric-value">${copy.fitSummary.metrics.mse.toFixed(6)}</div>
+          </div>
+          <div class="fit-metric-item">
+            <div class="fit-metric-label">RMSE</div>
+            <div class="fit-metric-value">${copy.fitSummary.metrics.rmse.toFixed(6)}</div>
+          </div>
+          <div class="fit-metric-item">
+            <div class="fit-metric-label">MAE</div>
+            <div class="fit-metric-value">${copy.fitSummary.metrics.mae.toFixed(6)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  ` : '<div class="readonly-section"><h3>📊 拟合摘要</h3><div class="empty-state">该数据集尚未进行拟合</div></div>';
+
+  const comparisonRows = copy.fieldComparison.map(item => {
+    let statusClass = '';
+    if (item.status === 'kept') statusClass = 'status-kept';
+    else if (item.status === 'hidden') statusClass = 'status-hidden';
+    else if (item.status === 'replaced') statusClass = 'status-replaced';
+
+    const statusIcon = item.status === 'kept' ? '✓ 保留' : item.status === 'hidden' ? '✕ 已隐藏' : '↻ 已替换';
+
+    return `
+      <div class="field-comparison-row">
+        <span class="field-name">${item.field}</span>
+        <span class="field-original">${item.original}</span>
+        <span class="field-desensitized ${statusClass}">${statusIcon} · ${item.desensitized}</span>
+      </div>
+    `;
+  }).join('');
+
+  const comparisonHeader = `
+    <div class="field-comparison-row field-comparison-header">
+      <span class="field-name">字段</span>
+      <span class="field-original">原始值</span>
+      <span class="field-desensitized">脱敏后</span>
+    </div>
+  `;
+
+  const pointsRows = copy.points.map((p, i) => `
+    <tr>
+      <td>#${i + 1}</td>
+      <td>${p.x}</td>
+      <td>${p.y}</td>
+    </tr>
+  `).join('');
+
+  body.innerHTML = `
+    <div class="modal-warning">
+      ⚠️ 此为只读脱敏共享副本，样品名、批次号和备注信息已被隐藏或替换。副本独立于原始数据集，不会影响原始数据和历史记录。
+    </div>
+
+    <div class="readonly-section">
+      <h3>📋 脱敏后信息</h3>
+      <div class="readonly-info-grid">
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">匿名编号</div>
+          <div class="readonly-info-value">${copy.anonymousId}</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">只读状态</div>
+          <div class="readonly-info-value status-kept">${copy.readOnly ? '✓ 已锁定' : '未锁定'}</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">样品名</div>
+          <div class="readonly-info-value hidden-field">已隐藏</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">批次号</div>
+          <div class="readonly-info-value hidden-field">已隐藏</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">备注</div>
+          <div class="readonly-info-value hidden-field">已隐藏</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">数据点数</div>
+          <div class="readonly-info-value">${copy.points.length} 个</div>
+        </div>
+      </div>
+    </div>
+
+    ${fitSummary}
+
+    <div class="readonly-section">
+      <h3>🔍 脱敏前后字段对比</h3>
+      <div class="field-comparison-table">
+        ${comparisonHeader}
+        ${comparisonRows}
+      </div>
+    </div>
+
+    <div class="readonly-section">
+      <h3>📈 数据点位（保留）</h3>
+      <div class="readonly-table-wrapper">
+        <table class="readonly-table">
+          <thead>
+            <tr>
+              <th style="width:60px">#</th>
+              <th>X 轴</th>
+              <th>Y 轴</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${pointsRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="readonly-section">
+      <h3>📝 元信息</h3>
+      <div class="readonly-info-grid">
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">副本ID</div>
+          <div class="readonly-info-value" style="font-size:11px">${copy.id}</div>
+        </div>
+        <div class="readonly-info-item">
+          <div class="readonly-info-label">生成时间</div>
+          <div class="readonly-info-value">${new Date(copy.createdAt).toLocaleString('zh-CN')}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function closeSharedCopyModal() {
+  document.getElementById('sharedCopyModal').style.display = 'none';
+}
+
+async function deleteSharedCopy(id) {
+  if (!confirm('确定删除这个脱敏副本吗？这不会影响原始数据集。')) return;
+  try {
+    const res = await fetch(`/api/shared-copies/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error('删除失败');
+    showToast('脱敏副本已删除', 'success');
+    loadSharedCopies();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 function init() {
@@ -600,6 +963,7 @@ function init() {
   clearDataTable();
   loadHistory();
   loadDatasets();
+  loadSharedCopies();
   updateDatasetButtons();
 }
 
